@@ -244,8 +244,8 @@ function ta_frank_wolfe(ta_data; method="BFW", max_iter_no=2000, step="exact", l
 
     # Finding a starting feasible solution
     travel_time = BPR(zeros(number_of_links))
-    # x0 = all_or_nothing(travel_time)
-    x0 = all_or_nothing!(weights, travel_time)
+    x0 = all_or_nothing(travel_time)
+    # x0 = all_or_nothing!(weights, travel_time)
 
     # Initializing variables
     xk = x0
@@ -291,8 +291,8 @@ function ta_frank_wolfe(ta_data; method="BFW", max_iter_no=2000, step="exact", l
     for k=1:max_iter_no
         # Finding yk
         travel_time = BPR(xk)
-        # yk_FW = all_or_nothing(travel_time)
-        yk_FW = all_or_nothing!(weights, travel_time)
+        yk_FW = all_or_nothing(travel_time)
+        # yk_FW = all_or_nothing!(weights, travel_time)
 
         # Basic Frank-Wolfe Direction
         dk_FW = yk_FW - xk
