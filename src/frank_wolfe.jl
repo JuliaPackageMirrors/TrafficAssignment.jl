@@ -56,6 +56,9 @@ function ta_frank_wolfe(ta_data; method="BFW", max_iter_no=2000, step="exact", l
     graph = create_graph(start_node, end_node)
     link_dic = sparse(start_node, end_node, 1:number_of_links)
 
+    # initializing weight matrix, will be reused.
+    weights = fill(Inf, (number_of_nodes, number_of_nodes))
+
     setup_time = time() - setup_time
 
     if log=="on"
@@ -68,14 +71,27 @@ function ta_frank_wolfe(ta_data; method="BFW", max_iter_no=2000, step="exact", l
 
 
     function BPR(x)
-        travel_time = free_flow_time .* ( 1.0 + B .* (x./capacity).^power )
-        generalized_cost = travel_time + toll_factor *toll + distance_factor * link_length
-        return generalized_cost
+        # travel_time = free_flow_time .* ( 1.0 + B .* (x./capacity).^power )
+        # generalized_cost = travel_time + toll_factor * toll + distance_factor * link_length
+        # return generalized_cost
+        bpr = similar(x)
+        for i=1:length(bpr)
+            bpr[i] = free_flow_time[i] * ( 1.0 + B[i] * (x[i]/capacity[i])^power[i] ) + toll_factor * toll[i] + distance_factor * link_length[i]
+        end
+        return bpr
+
+        # return free_flow_time .* ( 1.0 + B .* (x./capacity).^power ) + toll_factor * toll + distance_factor * link_length
     end
 
     function objective(x)
-        value = free_flow_time .* ( x + B.* ( x.^(power+1)) ./ (capacity.^power) ./ (power+1))
-        return sum(value)
+        sum = 0
+
+        for i=1:length(x)
+            sum += free_flow_time[i] * ( x[i] + B[i]* ( x[i]^(power[i]+1)) / (capacity[i]^power[i]) / (power[i]+1))
+        end
+
+        return sum
+        # return sum( free_flow_time .* ( x + B.* ( x.^(power+1)) ./ (capacity.^power) ./ (power+1)) )
     end
 
     function gradient(x)
@@ -112,23 +128,28 @@ function ta_frank_wolfe(ta_data; method="BFW", max_iter_no=2000, step="exact", l
         #Link travel time = free flow time * ( 1 + B * (flow/capacity)^Power ).
     end
 
+    spp_total = 0
+    vvv_total = 0
+
     function all_or_nothing_single(travel_time)
         state = []
         path = []
-        v = []
         x = zeros(size(start_node))
 
         for r=1:size(travel_demand)[1]
             # for each origin node r, find shortest paths to all destination nodes
+            spp = time()
             state = dijkstra_shortest_paths(graph, travel_time, r)
+            spp_total = spp_total + time() - spp
 
+            vvv = time()
             for s=1:size(travel_demand)[2]
                 # for each destination node s, find the shortest-path vector
-                v = get_vector(state, r, s, start_node, end_node)
-
-                # load travel demand
-                x = x + v * travel_demand[r,s]
+                # and load travel demand
+                x = x + travel_demand[r,s] * get_vector(state, r, s, link_dic)
             end
+            vvv_total = vvv_total + time() - vvv
+            # println("vvv=$vvv")
         end
 
         return x
@@ -183,7 +204,35 @@ function ta_frank_wolfe(ta_data; method="BFW", max_iter_no=2000, step="exact", l
 
 
 
+    function all_or_nothing!(_weights, travel_time)
+        # This method uses Floyd-Warshall
+        x = zeros(size(start_node))
 
+        spp = time()
+
+        # Updating weights. Inf will remain Inf.
+        for i=1:number_of_links
+            _weights[start_node[i], end_node[i]] = travel_time[i]
+        end
+
+        dists = copy(_weights)
+
+        nexts = fill(-1, (number_of_nodes, number_of_nodes))
+        floyd_warshall!(dists, nexts)
+        spp_total = spp_total + time() - spp
+
+        vvv = time()
+        for r=1:size(travel_demand)[1]
+            for s=1:size(travel_demand)[2]
+                if travel_demand[r,s] > 0.0
+                    x = x + travel_demand[r,s] * get_vector(nexts, r, s, link_dic)
+                end
+            end
+        end
+        vvv_total = vvv_total + time() - vvv
+
+        return x
+    end
 
 
 
@@ -195,7 +244,8 @@ function ta_frank_wolfe(ta_data; method="BFW", max_iter_no=2000, step="exact", l
 
     # Finding a starting feasible solution
     travel_time = BPR(zeros(number_of_links))
-    x0 = all_or_nothing(travel_time)
+    # x0 = all_or_nothing(travel_time)
+    x0 = all_or_nothing!(weights, travel_time)
 
     # Initializing variables
     xk = x0
@@ -241,8 +291,8 @@ function ta_frank_wolfe(ta_data; method="BFW", max_iter_no=2000, step="exact", l
     for k=1:max_iter_no
         # Finding yk
         travel_time = BPR(xk)
-        yk_FW = all_or_nothing(travel_time)
-
+        # yk_FW = all_or_nothing(travel_time)
+        yk_FW = all_or_nothing!(weights, travel_time)
 
         # Basic Frank-Wolfe Direction
         dk_FW = yk_FW - xk
@@ -392,6 +442,8 @@ function ta_frank_wolfe(ta_data; method="BFW", max_iter_no=2000, step="exact", l
         println("Iteration time = $iteration_time seconds")
     end
 
+
+    println("spp_total=$spp_total, vvv_total=$vvv_total")
     return xk, travel_time, objective(xk)
 
 end
